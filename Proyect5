@@ -1,0 +1,211 @@
+//Definir tiempo y geometria coleccion LS5
+var c = ee.ImageCollection(LS5.filterDate('1985-01-01','2010-12-31').filterBounds(table3));
+print("nativa", c);
+
+
+
+//Filtrado Nubes
+var withCloudiness = c.map(function(image) {
+  var cloud = ee.Algorithms.Landsat.simpleCloudScore(image).select('cloud');
+  var cloudiness = cloud.reduceRegion({
+    reducer: 'mean', 
+    geometry: table3,
+    scale: 30,
+  });
+  return image.set(cloudiness);
+});
+var filteredCollection = withCloudiness.filter(ee.Filter.lt('cloud', 1));
+print ("Colleccion Filtrada", filteredCollection);
+
+
+
+//Agregar banda NDVI, EVI ,SAVI, NDWI
+var addVI = function(image) {
+  var ndvi = image.normalizedDifference(['B4', 'B3']).rename('NDVI');
+  var evi = image.expression(
+  '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))', {
+    'NIR': image.select('B4'),
+    'RED': image.select('B3'),
+    'BLUE': image.select('B1')}).rename('EVI');
+  var savi = image.expression(
+  '1.5*(NIR - RED) / (NIR + RED + 0.5)', {
+    'NIR': image.select('B4'),
+    'RED': image.select('B3')}).rename('SAVI');
+  var ndwi = image.normalizedDifference(['B2','B4']).rename('NDWI');
+  return image.addBands(ndvi).addBands(evi).addBands(savi).addBands(ndwi);
+};
+var withVI = filteredCollection.map(addVI);
+print ("conBandas", withVI);
+
+var trueColour = { //Color "real"
+      bands: ["B3", "B2", "B1"]};
+
+
+
+//Composición de Imagen anual
+//Composicion de imagenes 1985
+var cverano1985 = withVI.filterDate('1986-01-01', '1986-3-31');
+print ("Coleccion1985", cverano1985);
+var median1985 = cverano1985.median();
+print ("Composicion1985", median1985);
+Map.addLayer(median1985, trueColour, "Composicion1985");
+//Composicion de imagenes 1990
+var cverano1990 = withVI.filterDate('1990-01-01', '1990-12-31');
+print ("Coleccion1990", cverano1990);
+var median1990 = cverano1990.median();
+print ("Composicion1990", median1990);
+Map.addLayer(median1990, trueColour, "Composicion1990");
+//Composicion de imagenes 1995
+var cverano1995 = withVI.filterDate('1995-01-01', '1995-03-31');
+print ("Coleccion1995", cverano1995);
+var median1995 = cverano1995.median();
+print ("Composicion1995", median1995);
+Map.addLayer(median1995, trueColour, "Composicion1995");
+//Composicion de imagenes 2000
+var cverano2000 = withVI.filterDate('2000-01-01', '2000-03-31');
+print ("Coleccion2000", cverano2000);
+var median2000 = cverano2000.median();
+print ("Composicion2000", median2000);
+Map.addLayer(median2000, trueColour, "Composicion2000");
+//Composicion de imagenes 2005
+var cverano2005 = withVI.filterDate('2005-01-01', '2005-03-31');
+print ("Coleccion2005", cverano2005);
+var median2005 = cverano2005.median();
+print ("Composicion2005", median2005);
+Map.addLayer(median2005, trueColour, "Composicion2005");
+//Composicion de imagenes 2010
+var cverano2010 = withVI.filterDate('2010-01-01', '2010-03-31');
+print ("Coleccion2010", cverano2010);
+var median2010 = cverano2010.median();
+print ("Composicion2010", median2010);
+Map.addLayer(median2010, trueColour, "Composicion2010");
+//Test de imagenes composición 2000
+var listImages = cverano2000.toList(cverano2000.size());
+var firstImage = ee.Image(listImages.get(0));
+var secondImage = ee.Image(listImages.get(1));
+var lastImage = ee.Image(listImages.get(listImages.length().subtract(1)));
+print("Imagen test 1",firstImage);
+print("Imagen test 2", secondImage);
+print("Imagen test 3", lastImage);
+
+
+
+//Función Mosaico de NDVI
+var addMosaic = function(image) {
+// Crear indices de mosaico
+  var ndvi = image.select('NDVI');
+  var ndwi = image.select('NDWI');
+// Definir humbrales para Suelo Desnudo (bare1) y Suelo Semi-desnudo (bare2)
+  var bare1 = ndvi.lt(0.3).and(ndwi.lt(0.3));
+// This detects bare land with lower sensitivity. It also detects shadows.
+  var bare2 = ndvi.lt(0.3).and(ndwi.lt(0.8));
+// Definir parametros de visualizacion. Paleta Azul y Verde
+  var ndviViz = {min: -1, max: 1, palette: ['FF0000', '00FF00']};
+  var ndwiViz = {min: 0.5, max: 1, palette: ['00FFFF', '0000FF']};
+// Mosaico de visualizacion
+  var mosaic = ee.ImageCollection([
+  // NDWI > 0.5 agua.
+    ndwi.updateMask(ndwi.gte(0.5)).visualize(ndwiViz),
+  // NDVI > 0.3 vegetacion.
+    ndvi.updateMask(ndvi.gte(0.3)).visualize(ndviViz),
+  // Visualize bare areas with shadow (bare2 but not bare1) as gray.
+    bare2.updateMask(bare2.and(bare1.not())).visualize({palette: ['AAAAAA']}),
+  // Visualize the other bare areas as white.
+    bare1.updateMask(bare1).visualize({palette: ['FFFFFF']}),
+  ]).mosaic();
+  return mosaic;
+};
+var mosaic1985 = addMosaic(median1985);
+print ("Mosaic1985", mosaic1985)
+Map.addLayer(mosaic1985, {}, 'Visualization mosaic1985');
+var mosaic1990 = addMosaic(median1990);
+print ("Mosaic1990", mosaic1990)
+Map.addLayer(mosaic1990, {}, 'Visualization mosaic1990');
+var mosaic1995 = addMosaic(median1995);
+print ("Mosaic1995", mosaic1995)
+Map.addLayer(mosaic1995, {}, 'Visualization mosaic1995');
+var mosaic2000 = addMosaic(median2000);
+print ("Mosaic2000", mosaic2000)
+Map.addLayer(mosaic2000, {}, 'Visualization mosaic2000');
+var mosaic2005 = addMosaic(median2005);
+print ("Mosaic2005", mosaic2005)
+Map.addLayer(mosaic2005, {}, 'Visualization mosaic2005');
+var mosaic2010 = addMosaic(median2010);
+print ("Mosaic2010", mosaic2010)
+Map.addLayer(mosaic2010, {}, 'Visualization mosaic2010');
+
+
+
+//Visualizacion 
+
+var visualNDVI = { //visualizacion NDVI
+        bands: ['NDVI'],
+        min: 0,
+        max: 1,
+        palette: ['FF0000', '00FF00']};
+var visualEVI = { //EVI
+        bands: ['EVI'],
+        min: -5,
+        max: 5,
+        palette: ['0FFFF0', '0FF000']};
+var visualSAVI = { //SAVI
+        bands: ['SAVI'],
+        min: 0, 
+        max: 1, 
+        palette: ['00FFFF', '0000FF']};
+Map.centerObject(table3, 12)
+Map.addLayer(firstImage, trueColour, "Test Imagen 1");
+Map.addLayer(secondImage, trueColour, "Test imagen 2");
+Map.addLayer(secondImage, trueColour, "Test imagen 3");
+Map.addLayer(table, trueColour, "Petorca");
+Map.addLayer(table3, trueColour, "HierroViejo");
+Map.addLayer(c, trueColour, 'nativa');
+Map.addLayer(withVI, visualNDVI, 'NDVI');
+
+var listaMedia = [median1985, median1990, median1995, median2000, median2005, median2010]
+var listaMosaico = [mosaic1985, mosaic1990, mosaic1995, mosaic2000 , mosaic2005, mosaic2010];
+var ColeccionG = ee.ImageCollection.fromImages(listaMedia);
+print("Coleccion Gift", ColeccionG);
+
+
+var gifParams = {
+  'region': table3,
+  'dimensions': 30,
+  'crs': 'EPSG:3857',
+  'framesPerSecond': 1
+};
+print(ColeccionG.getVideoThumbURL(gifParams));
+
+//CHARTS
+var plotNDVI = ui.Chart.image.seriesByRegion(withVI, table3,ee.Reducer.mean(),
+'NDVI',500,'system:time_start', 'system:index')
+              .setChartType('LineChart').setOptions({
+                title: 'NDVI short-term time series',
+                hAxis: {title: 'Date'},
+                vAxis: {title: 'NDVI'}
+});
+print(plotNDVI);
+var plotEVI = ui.Chart.image.seriesByRegion(withVI, table3,ee.Reducer.mean(),
+'EVI',500,'system:time_start', 'system:index')
+              .setChartType('LineChart').setOptions({
+                title: 'EVI short-term time series',
+                hAxis: {title: 'Date'},
+                vAxis: {title: 'EVI'}
+});
+print(plotEVI);
+var plotSAVI = ui.Chart.image.seriesByRegion(withVI, table3,ee.Reducer.mean(),
+'SAVI',500,'system:time_start', 'system:index')
+              .setChartType('LineChart').setOptions({
+                title: 'SAVI short-term time series',
+                hAxis: {title: 'Date'},
+                vAxis: {title: 'SAVI'}
+});
+print(plotSAVI);
+var plotNDWI = ui.Chart.image.seriesByRegion(withVI, table3,ee.Reducer.mean(),
+'NDWI',500,'system:time_start', 'system:index')
+              .setChartType('LineChart').setOptions({
+                title: 'NDWI short-term time series',
+                hAxis: {title: 'Date'},
+                vAxis: {title: 'NDWI'}
+});
+print(plotNDWI);
